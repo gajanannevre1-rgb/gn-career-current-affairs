@@ -70,6 +70,14 @@ def fetch_feed(query, language, fallback):
         link = clean(item.findtext("link"))
         source_node = item.find("source")
         source = clean(source_node.text if source_node is not None else "") or "Google News"
+        # Some RSS publishers include a thumbnail. Keep it when present; the app
+        # uses a category-themed image when a feed has no thumbnail.
+        image_url = ""
+        for image_node in item.findall(".//{http://search.yahoo.com/mrss/}thumbnail") + item.findall(".//{http://search.yahoo.com/mrss/}content") + item.findall("enclosure"):
+            candidate_image = (image_node.attrib.get("url") or "").strip()
+            if candidate_image.startswith(("https://", "http://")):
+                image_url = candidate_image
+                break
         date_text = clean(item.findtext("pubDate"))
         try:
             from email.utils import parsedate_to_datetime
@@ -81,6 +89,7 @@ def fetch_feed(query, language, fallback):
                 "title": title,
                 "summary": summary,
                 "url": link,
+                "imageUrl": image_url,
                 "source": source,
                 "language": language,
                 "category": category_for(title, summary, fallback),
