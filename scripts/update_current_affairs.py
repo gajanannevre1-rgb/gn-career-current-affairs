@@ -99,6 +99,61 @@ def fetch_feed(query, language, fallback):
     return articles
 
 
+def fetch_article_details(url):
+    """Best-effort extraction of publisher-provided article text and lead image."""
+    details = {"imageUrl": "", "content": ""}
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; GN-Career-Path-Academy/1.0)", "Accept": "text/html"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            if "text/html" not in response.headers.get("Content-Type", "").lower():
+                return details
+            page = response.read(1_500_000).decode("utf-8", errors="replace")
+    except Exception:
+        return details
+
+    # Prefer publisher's Open Graph/Twitter lead image.
+    image_patterns = [
+        r'<meta[^>]+(?:property|name)=["\\']og:image["\\'][^>]+content=["\\']([^"\\']+)',
+        r'<meta[^>]+content=["\\']([^"\\']+)["\\'][^>]+(?:property|name)=["\\']og:image["\\']',
+        r'<meta[^>]+(?:property|name)=["\\']twitter:image(?::src)?["\\'][^>]+content=["\\']([^"\\']+)',
+    ]
+    for pattern in image_patterns:
+        match = re.search(pattern, page, flags=re.I)
+        if match:
+            candidate = html.unescape(match.group(1).strip())
+            if candidate.startswith("//"):
+                candidate = "https:" + candidate
+            if candidate.startswith(("https://", "http://")):
+                details["imageUrl"] = candidate
+                break
+
+    # Use articleBody only when the publisher exposes it in structured metadata.
+    body_match = re.search(r'["\\']articleBody["\\']\\s*:\\s*("(?:\\\\.|[^"\\\\])*")', page, flags=re.I)
+    if body_match:
+        try:
+            body = json.loads(body_match.group(1))
+            body = clean(body)
+            if len(body) >= 250:
+                details["content"] = body[:12000]
+        except Exception:
+            pass
+
+    if not details["content"]:
+        description_patterns = [
+            r'<meta[^>]+(?:property|name)=["\\']og:description["\\'][^>]+content=["\\']([^"\\']+)',
+            r'<meta[^>]+name=["\\']description["\\'][^>]+content=["\\']([^"\\']+)',
+        ]
+        for pattern in description_patterns:
+            match = re.search(pattern, page, flags=re.I)
+            if match:
+                details["content"] = clean(match.group(1))[:2000]
+                break
+    return details
+
+
 def main():
     by_url = {}
     failures = []
@@ -117,6 +172,16 @@ def main():
         key=lambda item: item["publishedAt"],
         reverse=True,
     )[:MAX_TOTAL]
+
+    # Enrich the newest 60 stories where publishers allow access. RSS-only data
+    # remains usable if a publisher blocks scraping or does not expose metadata.
+    for article in articles[:60]:
+        details = fetch_article_details(article["url"])
+        if details.get("imageUrl"):
+            article["imageUrl"] = details["imageUrl"]
+        if details.get("content"):
+            article["content"] = details["content"]
+
     payload = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "articles": articles,
