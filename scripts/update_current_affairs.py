@@ -116,9 +116,9 @@ def fetch_article_details(url):
 
     # Prefer publisher's Open Graph/Twitter lead image.
     image_patterns = [
-        r'<meta[^>]+(?:property|name)=["\\']og:image["\\'][^>]+content=["\\']([^"\\']+)',
-        r'<meta[^>]+content=["\\']([^"\\']+)["\\'][^>]+(?:property|name)=["\\']og:image["\\']',
-        r'<meta[^>]+(?:property|name)=["\\']twitter:image(?::src)?["\\'][^>]+content=["\\']([^"\\']+)',
+        r"""<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)""",
+        r"""<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:image["']""",
+        r"""<meta[^>]+(?:property|name)=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)""",
     ]
     for pattern in image_patterns:
         match = re.search(pattern, page, flags=re.I)
@@ -131,7 +131,7 @@ def fetch_article_details(url):
                 break
 
     # Use articleBody only when the publisher exposes it in structured metadata.
-    body_match = re.search(r'["\\']articleBody["\\']\\s*:\\s*("(?:\\\\.|[^"\\\\])*")', page, flags=re.I)
+    body_match = re.search(r"""["']articleBody["']\s*:\s*("(?:\\.|[^"\\])*")""", page, flags=re.I)
     if body_match:
         try:
             body = json.loads(body_match.group(1))
