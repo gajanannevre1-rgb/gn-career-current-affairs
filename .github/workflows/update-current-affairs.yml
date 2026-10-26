@@ -1,6 +1,13 @@
 name: Update Current Affairs
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/update_current_affairs.py"
+      - "data/current_affairs.json"
+      - ".github/workflows/update-current-affairs.yml"
   schedule:
     # GitHub Actions cron uses UTC. Runs at 00:00, 06:00, 12:00, and 18:00 UTC.
     - cron: "0 */6 * * *"
@@ -16,7 +23,7 @@ concurrency:
 jobs:
   update-current-affairs:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -25,6 +32,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+
+      - name: Validate Python syntax
+        run: python -m py_compile scripts/update_current_affairs.py
 
       - name: Fetch RSS feeds and write JSON
         run: python scripts/update_current_affairs.py
