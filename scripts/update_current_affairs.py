@@ -143,8 +143,8 @@ def fetch_article_details(url):
 
     if not details["content"]:
         description_patterns = [
-            r'<meta[^>]+(?:property|name)=["\\']og:description["\\'][^>]+content=["\\']([^"\\']+)',
-            r'<meta[^>]+name=["\\']description["\\'][^>]+content=["\\']([^"\\']+)',
+            r"""<meta[^>]+(?:property|name)=["']og:description["'][^>]+content=["']([^"']+)""",
+            r"""<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)""",
         ]
         for pattern in description_patterns:
             match = re.search(pattern, page, flags=re.I)
