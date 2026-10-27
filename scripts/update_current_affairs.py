@@ -5,6 +5,7 @@ import json
 import re
 import urllib.parse
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,30 @@ def clean(value):
     value = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", value, flags=re.I)
     value = re.sub(r"<[^>]+>", " ", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def translate_text(text, target):
+    """Translate short news text for bilingual reading; keep original if service is unavailable."""
+    text = clean(text)
+    if not text:
+        return ""
+    # Keep requests bounded and avoid sending extremely long publisher pages.
+    text = text[:4500]
+    params = urllib.parse.urlencode({
+        "client": "gtx", "sl": "auto", "tl": target, "dt": "t", "q": text
+    })
+    request = urllib.request.Request(
+        "https://translate.googleapis.com/translate_a/single?" + params,
+        headers={"User-Agent": "Mozilla/5.0 GN-Career-Path-Academy/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        translated = "".join(part[0] for part in result[0] if part and part[0])
+        return clean(translated) if translated else text
+    except Exception as error:
+        print(f"WARNING: translation to {target} unavailable: {error}")
+        return text
 
 
 def category_for(title, summary, fallback):
@@ -208,9 +233,8 @@ def main():
         reverse=True,
     )[:MAX_TOTAL]
 
-    # Resolve Google News redirect links and enrich the newest 60 stories using
-    # one browser instance. Publisher pages may block automated access; those
-    # stories keep an empty image/content rather than incorrect Google branding.
+    # Resolve publisher metadata for the newest stories. If a publisher image is
+    # unavailable, the app displays a designed category fallback instead of a blank.
     browser = None
     browser_page = None
     try:
@@ -222,7 +246,7 @@ def main():
         print(f"WARNING: Playwright unavailable; article enrichment will use direct HTTP only: {error}")
 
     try:
-        for article in articles[:60]:
+        for article in articles[:80]:
             details = fetch_article_details(article["url"], browser_page=browser_page)
             if details.get("imageUrl"):
                 article["imageUrl"] = details["imageUrl"]
@@ -233,6 +257,26 @@ def main():
         if browser is not None:
             browser.close()
             playwright.stop()
+
+    # Provide English + Hindi + Marathi fields for every story. Translate detailed
+    # article text where available; keep concise summaries for stories whose publishers
+    # block full-text access. Translation failures safely fall back to original text.
+    for article in articles:
+        base_title = article.get("title", "")
+        base_summary = article.get("summary", "")
+        base_content = article.get("content", "") or base_summary
+        article["titleHindi"] = translate_text(base_title, "hi")
+        article["titleMarathi"] = translate_text(base_title, "mr")
+        article["summaryHindi"] = translate_text(base_summary, "hi")
+        article["summaryMarathi"] = translate_text(base_summary, "mr")
+        article["contentHindi"] = translate_text(base_content, "hi")
+        article["contentMarathi"] = translate_text(base_content, "mr")
+        # A consistent exam-oriented note is available even when a publisher blocks
+        # its article page; the app must not invent missing facts.
+        article["examPoints"] = [
+            "Identify the person, institution, place, date and figures explicitly mentioned in the story.",
+            "Revise only facts supported by the available news text; verify important exam facts with an official source."
+        ]
 
     payload = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
