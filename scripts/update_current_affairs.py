@@ -99,19 +99,40 @@ def fetch_feed(query, language, fallback):
     return articles
 
 
-def fetch_article_details(url):
-    """Best-effort extraction of publisher-provided article text and lead image."""
+def fetch_article_details(url, browser_page=None):
+    """Resolve Google News redirects, then extract publisher metadata when accessible."""
     details = {"imageUrl": "", "content": ""}
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; GN-Career-Path-Academy/1.0)", "Accept": "text/html"}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            if "text/html" not in response.headers.get("Content-Type", "").lower():
-                return details
-            page = response.read(1_500_000).decode("utf-8", errors="replace")
-    except Exception:
+    page = ""
+    article_url = url
+
+    # Google News RSS links often return a Google News shell to plain HTTP clients.
+    # Use one shared Playwright page in Actions to resolve the link to the publisher.
+    if browser_page is not None:
+        try:
+            browser_page.goto(url, wait_until="domcontentloaded", timeout=12000)
+            browser_page.wait_for_timeout(800)
+            article_url = browser_page.url
+            page = browser_page.content()
+        except Exception:
+            page = ""
+    if not page or "news.google.com" in urllib.parse.urlparse(article_url).netloc:
+        request = urllib.request.Request(
+            article_url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GN-Career-Path-Academy/1.0)", "Accept": "text/html"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=8) as response:
+                final_url = response.geturl()
+                if final_url:
+                    article_url = final_url
+                if "text/html" not in response.headers.get("Content-Type", "").lower():
+                    return details
+                page = response.read(1_500_000).decode("utf-8", errors="replace")
+        except Exception:
+            return details
+
+    # Never publish generic Google News branding/description as the article's photo or text.
+    if "news.google.com" in urllib.parse.urlparse(article_url).netloc:
         return details
 
     # Prefer publisher's Open Graph/Twitter lead image.
@@ -173,14 +194,31 @@ def main():
         reverse=True,
     )[:MAX_TOTAL]
 
-    # Enrich the newest 60 stories where publishers allow access. RSS-only data
-    # remains usable if a publisher blocks scraping or does not expose metadata.
-    for article in articles[:60]:
-        details = fetch_article_details(article["url"])
-        if details.get("imageUrl"):
-            article["imageUrl"] = details["imageUrl"]
-        if details.get("content"):
-            article["content"] = details["content"]
+    # Resolve Google News redirect links and enrich the newest 60 stories using
+    # one browser instance. Publisher pages may block automated access; those
+    # stories keep an empty image/content rather than incorrect Google branding.
+    browser = None
+    browser_page = None
+    try:
+        from playwright.sync_api import sync_playwright
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(headless=True)
+        browser_page = browser.new_page(user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36")
+    except Exception as error:
+        print(f"WARNING: Playwright unavailable; article enrichment will use direct HTTP only: {error}")
+
+    try:
+        for article in articles[:60]:
+            details = fetch_article_details(article["url"], browser_page=browser_page)
+            if details.get("imageUrl"):
+                article["imageUrl"] = details["imageUrl"]
+            if details.get("content"):
+                article["content"] = details["content"]
+            print(f"Enriched: image={bool(article.get('imageUrl'))}, content={bool(article.get('content'))}, title={article['title'][:70]}")
+    finally:
+        if browser is not None:
+            browser.close()
+            playwright.stop()
 
     payload = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
