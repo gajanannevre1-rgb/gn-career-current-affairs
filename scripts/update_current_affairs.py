@@ -260,7 +260,7 @@ def main():
 
     # Translate the title, summary and available article text in two bounded requests
     # per story, reducing the chance of hitting the Actions time limit.
-    separator = "\\n\\n<<<GN_SECTION>>>\\n\\n"
+    separator = "\n\n<<<GN_SECTION>>>\n\n"
     for article in articles:
         base_title = article.get("title", "")
         base_summary = article.get("summary", "")
