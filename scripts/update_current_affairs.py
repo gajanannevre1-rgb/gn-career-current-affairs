@@ -246,7 +246,7 @@ def main():
         print(f"WARNING: Playwright unavailable; article enrichment will use direct HTTP only: {error}")
 
     try:
-        for article in articles[:80]:
+        for article in articles[:30]:
             details = fetch_article_details(article["url"], browser_page=browser_page)
             if details.get("imageUrl"):
                 article["imageUrl"] = details["imageUrl"]
@@ -258,21 +258,26 @@ def main():
             browser.close()
             playwright.stop()
 
-    # Provide English + Hindi + Marathi fields for every story. Translate detailed
-    # article text where available; keep concise summaries for stories whose publishers
-    # block full-text access. Translation failures safely fall back to original text.
+    # Translate the title, summary and available article text in two bounded requests
+    # per story, reducing the chance of hitting the Actions time limit.
+    separator = "\\n\\n<<<GN_SECTION>>>\\n\\n"
     for article in articles:
         base_title = article.get("title", "")
         base_summary = article.get("summary", "")
         base_content = article.get("content", "") or base_summary
-        article["titleHindi"] = translate_text(base_title, "hi")
-        article["titleMarathi"] = translate_text(base_title, "mr")
-        article["summaryHindi"] = translate_text(base_summary, "hi")
-        article["summaryMarathi"] = translate_text(base_summary, "mr")
-        article["contentHindi"] = translate_text(base_content, "hi")
-        article["contentMarathi"] = translate_text(base_content, "mr")
-        # A consistent exam-oriented note is available even when a publisher blocks
-        # its article page; the app must not invent missing facts.
+        combined = separator.join([base_title, base_summary, base_content])[:4500]
+        for target, suffix in (("hi", "Hindi"), ("mr", "Marathi")):
+            translated = translate_text(combined, target)
+            parts = translated.split("<<<GN_SECTION>>>")
+            parts = [clean(part) for part in parts]
+            if len(parts) >= 3:
+                article["title" + suffix] = parts[0] or base_title
+                article["summary" + suffix] = parts[1] or base_summary
+                article["content" + suffix] = parts[2] or base_content
+            else:
+                article["title" + suffix] = translate_text(base_title, target)
+                article["summary" + suffix] = translate_text(base_summary, target)
+                article["content" + suffix] = translate_text(base_content, target)
         article["examPoints"] = [
             "Identify the person, institution, place, date and figures explicitly mentioned in the story.",
             "Revise only facts supported by the available news text; verify important exam facts with an official source."
