@@ -170,8 +170,22 @@ def fetch_article_details(url, browser_page=None):
         for pattern in description_patterns:
             match = re.search(pattern, page, flags=re.I)
             if match:
-                details["content"] = clean(match.group(1))[:2000]
-                break
+                candidate = clean(match.group(1))
+                generic_descriptions = (
+                    "comprehensive up-to-date news coverage",
+                    "google news",
+                    "read more",
+                    "latest news",
+                )
+                if len(candidate) >= 120 and not any(
+                    marker in candidate.lower() for marker in generic_descriptions
+                ):
+                    details["content"] = candidate[:2000]
+                    break
+    # Avoid generic/reused Google-hosted thumbnails masquerading as article images.
+    if details["imageUrl"] and "lh3.googleusercontent.com" in details["imageUrl"]:
+        if re.search(r"(?:=s0-w\d+|=w\d+-h\d+|^)$", details["imageUrl"]):
+            details["imageUrl"] = ""
     return details
 
 
