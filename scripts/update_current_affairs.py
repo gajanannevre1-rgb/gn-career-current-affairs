@@ -74,6 +74,41 @@ def category_for(title, summary, fallback):
     return fallback or "National"
 
 
+def build_exam_points(title, summary, content=""):
+    """Build conservative revision prompts from facts actually present in the story text."""
+    text = clean(" ".join(part for part in (title, summary, content) if part))
+    points = [f"Main topic: {clean(title)}"] if clean(title) else []
+
+    # Capture explicit dates and numeric figures, without guessing what they mean.
+    facts = []
+    date_patterns = [
+        r"\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b",
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b",
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+        r"\b(?:19|20)\d{2}\b",
+        r"\b\d[\d,.]*(?:\s?(?:%|percent|crore|lakh|million|billion|₹|Rs\.?))\b",
+    ]
+    for pattern in date_patterns:
+        for match in re.findall(pattern, text, flags=re.I):
+            value = clean(match)
+            if value and value not in facts:
+                facts.append(value)
+            if len(facts) >= 5:
+                break
+        if len(facts) >= 5:
+            break
+    if facts:
+        points.append("Dates and figures to revise: " + ", ".join(facts) + ".")
+
+    # Use a short source-text detail, not a generated or inferred claim.
+    detail = clean(summary or content)
+    if detail:
+        points.append("Story detail: " + detail[:260].rstrip() + ("…" if len(detail) > 260 else ""))
+
+    points.append("For exam revision, verify names, dates, figures and scheme details against the linked original report or an official source.")
+    return points[:4]
+
+
 def fetch_feed(query, language, fallback):
     params = {
         "q": query,
@@ -252,6 +287,15 @@ def main():
                 article["imageUrl"] = details["imageUrl"]
             if details.get("content"):
                 article["content"] = details["content"]
+            # Keep a useful English reading field even when the publisher blocks full-text extraction.
+            # In that case this is the original RSS summary, not a claim that the full article was retrieved.
+            if not article.get("content") and article.get("summary"):
+                article["content"] = article["summary"]
+            article["examPoints"] = build_exam_points(
+                article.get("title", ""),
+                article.get("summary", ""),
+                article.get("content", ""),
+            )
             print(f"Enriched: image={bool(article.get('imageUrl'))}, content={bool(article.get('content'))}, title={article['title'][:70]}")
     finally:
         if browser is not None:
@@ -278,10 +322,11 @@ def main():
                 article["title" + suffix] = translate_text(base_title, target)
                 article["summary" + suffix] = translate_text(base_summary, target)
                 article["content" + suffix] = translate_text(base_content, target)
-        article["examPoints"] = [
-            "Identify the person, institution, place, date and figures explicitly mentioned in the story.",
-            "Revise only facts supported by the available news text; verify important exam facts with an official source."
-        ]
+        article["examPoints"] = build_exam_points(
+            article.get("title", ""),
+            article.get("summary", ""),
+            article.get("content", ""),
+        )
 
     payload = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
